@@ -271,6 +271,9 @@ export function buildChatPayload(
     temperature: cfg.temperature ?? 0.3,
     max_tokens: cfg.maxTokens ?? DEFAULT_MAX_TOKENS,
   };
+  if (cfg.reasoningEffort) {
+    payload.chat_template_kwargs = { reasoning_effort: cfg.reasoningEffort };
+  }
   if (cfg.mode === "tools") {
     payload.tools = openAiTools();
     payload.tool_choice = opts.toolChoice ?? "auto";

@@ -25,6 +25,21 @@ function loadDotEnv(): void {
 }
 loadDotEnv();
 
+const REASONING_EFFORTS = ["off", "low", "medium", "high"] as const;
+export type ReasoningEffort = typeof REASONING_EFFORTS[number];
+
+function parseReasoningEffort(raw: unknown, source: string): ReasoningEffort | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (typeof raw !== "string") {
+    throw new Error(`Invalid ${source}; expected off, low, medium, or high.`);
+  }
+  const value = raw.trim().toLowerCase();
+  if (!REASONING_EFFORTS.includes(value as ReasoningEffort)) {
+    throw new Error(`Invalid ${source}="${raw}"; expected off, low, medium, or high.`);
+  }
+  return value as ReasoningEffort;
+}
+
 /**
  * One model entry = one player in the benchmark.
  * Works with any OpenAI-compatible /v1/chat/completions endpoint:
@@ -50,6 +65,12 @@ export interface ModelConfig {
   mode: "tools" | "json";
   temperature?: number;
   maxTokens?: number;
+  /**
+   * llama.cpp/Jinja reasoning mode. Sent as
+   * chat_template_kwargs.reasoning_effort; leave unset for providers or
+   * templates that do not support it.
+   */
+  reasoningEffort?: ReasoningEffort;
   /** Extra HTTP headers (e.g. OpenRouter ranking headers). */
   extraHeaders?: Record<string, string>;
   /** Set false to keep the entry in the file but skip it in runs. */
@@ -182,6 +203,10 @@ export function loadConfig(): BenchConfig {
     }
   }
   const cfg: BenchConfig = { ...DEFAULTS, ...fileCfg };
+  cfg.models = cfg.models.map((model, index) => ({
+    ...model,
+    reasoningEffort: parseReasoningEffort(model.reasoningEffort, `models[${index}].reasoningEffort`),
+  }));
   if (process.env.LAUNCH_MODE === "spawn" || process.env.LAUNCH_MODE === "attach") {
     cfg.launchMode = process.env.LAUNCH_MODE;
   }
@@ -247,6 +272,7 @@ export function envModel(): ModelConfig | null {
   const baseURL = process.env.BASE_URL;
   const model = process.env.MODEL;
   if (!baseURL || !model) return null;
+  const reasoningEffort = parseReasoningEffort(process.env.MODEL_REASONING_EFFORT, "MODEL_REASONING_EFFORT");
   return {
     name: process.env.MODEL_NAME || model,
     baseURL,
@@ -255,6 +281,7 @@ export function envModel(): ModelConfig | null {
     mode: process.env.MODEL_MODE === "json" ? "json" : "tools",
     temperature: process.env.MODEL_TEMPERATURE ? Number(process.env.MODEL_TEMPERATURE) : undefined,
     maxTokens: process.env.MODEL_MAX_TOKENS ? Number(process.env.MODEL_MAX_TOKENS) : undefined,
+    reasoningEffort,
     enabled: true,
   };
 }

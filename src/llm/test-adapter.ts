@@ -92,6 +92,12 @@ eq("tools mode can require a tool call when explicitly requested", payload.tool_
 payload = buildChatPayload({ ...toolsCfg, maxTokens: 1_000_000 }, "system", { state: "SHOP" } as any, { step: 1, legalActions: ["shop_buy"] });
 eq("max_tokens follows the configured per-turn limit", payload.max_tokens, 1_000_000);
 
+payload = buildChatPayload({ ...toolsCfg, reasoningEffort: "off" }, "system", { state: "SHOP" } as any, { step: 1, legalActions: ["shop_buy"] });
+eq("reasoning effort is sent through llama.cpp chat template kwargs", payload.chat_template_kwargs, { reasoning_effort: "off" });
+
+payload = buildChatPayload(toolsCfg, "system", { state: "SHOP" } as any, { step: 1, legalActions: ["shop_buy"] });
+check("reasoning kwargs are omitted by default", !Object.prototype.hasOwnProperty.call(payload, "chat_template_kwargs"));
+
 eq("no_tool_call retry requires a tool", retryOptionsForDecision({ tool: "no_tool_call" }), { toolChoice: "required" });
 eq("length no_tool_call retry requires a tool", retryOptionsForDecision({ tool: "no_tool_call_length" }), { toolChoice: "required" });
 eq("normal tool call does not retry", retryOptionsForDecision({ tool: "play_hand" }), null);
@@ -136,6 +142,7 @@ eq("temperature is dropped for provider errors", { field: noTemperature?.field, 
 const noMaxTokens = sanitizePayloadForProviderError(requiredPayload, "max_tokens is not a valid field");
 eq("max_tokens is dropped for provider errors", { field: noMaxTokens?.field, hasMaxTokens: Object.prototype.hasOwnProperty.call(noMaxTokens?.payload ?? {}, "max_tokens") }, { field: "max_tokens", hasMaxTokens: false });
 eq("context length max_tokens errors are not treated as unsupported fields", sanitizePayloadForProviderError(requiredPayload, "context length exceeds max_tokens limit"), null);
+eq("reasoning control is never silently dropped", sanitizePayloadForProviderError({ ...requiredPayload, chat_template_kwargs: { reasoning_effort: "off" } }, "chat_template_kwargs is unsupported"), null);
 eq("unrelated provider error has no sanitizer", sanitizePayloadForProviderError(requiredPayload, "invalid api key"), null);
 
 console.log(`\n${pass} passed, ${fail} failed`);

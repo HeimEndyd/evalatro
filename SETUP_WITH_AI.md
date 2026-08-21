@@ -197,6 +197,7 @@ npm test          # expect "20 passed, 0 failed"
    - `MODEL` — the provider's model id
    - `MODEL_MODE` — `tools` for capable models, `json` for weak/local ones
    - `MODEL_MAX_TOKENS` is optional; the runner defaults to `16384` per turn.
+   - `MODEL_REASONING_EFFORT` is optional for llama.cpp/Jinja endpoints; accepted values are `off`, `low`, `medium`, and `high`.
    - `LLM_REQUEST_TIMEOUT_MS` is optional; raise it for very slow local or reasoning-heavy models.
 
 ## Step 6 · End-to-end verification

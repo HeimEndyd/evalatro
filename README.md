@@ -210,11 +210,16 @@ npm run leaderboard         # print the local leaderboard
 ```
 
 `npm run live`, `npm run bench`, and `npm run bench:watch` use `BASE_URL`, `BASE_KEY`, `MODEL`, `MODEL_MODE`,
-and optional model knobs like `MODEL_MAX_TOKENS` or `LLM_REQUEST_TIMEOUT_MS` from `.env` when no model name is
+and optional model knobs like `MODEL_MAX_TOKENS`, `MODEL_REASONING_EFFORT`, or `LLM_REQUEST_TIMEOUT_MS` from `.env` when no model name is
 passed. The default per-turn output limit is 16384 tokens; tools mode retries text-only answers with a required
 tool call and gracefully drops provider fields such as `tool_choice` or `response_format` when an OpenAI-compatible
 server rejects them. If `.env` has no active model settings, real-model commands stop instead of silently falling
 back to `naive`.
+
+For llama.cpp servers whose Jinja chat template supports it, set `MODEL_REASONING_EFFORT` to `off`, `low`,
+`medium`, or `high`. Named presets use the equivalent `reasoningEffort` property. Evalatro sends this as
+`chat_template_kwargs.reasoning_effort`; leave it unset for providers or templates that do not support that field.
+Unlike optional transport fields, reasoning control is never silently dropped after a provider error.
 
 Add named model presets in `balatro.config.json`, then run:
 

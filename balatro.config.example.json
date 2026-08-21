@@ -1,5 +1,6 @@
 {
   "_comment": "Copy to balatro.config.json and edit. QUICK PATH: set BASE_URL / BASE_KEY / MODEL in .env and run with no model argument. API keys come ONLY from env vars named by each model's apiKeyEnv — never put keys in this file. Submission goes to the public Evalatro leaderboard by default; set SUBMIT=false or pass --no-submit to opt out entirely.",
+  "_reasoningEffort_comment": "For a llama.cpp/Jinja endpoint that supports it, add reasoningEffort to a model: off, low, medium, or high. Leave it absent for other providers.",
   "_launchMode_comment": "spawn starts Balatro through balatrobot from PATH. attach connects to an already-running balatrobot HTTP server; use attach for Linux Steam+Proton (experimental, untested).",
   "launchMode": "spawn",
   "_targetAnte_comment": "Evalatro v2 target: clearing Ante 12 with no illegal moves scores 100. Clearing Ante 8 is only the base-game win, not a benchmark win.",
