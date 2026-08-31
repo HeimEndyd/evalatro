@@ -10,6 +10,7 @@ import { BalatroBotClient } from "../client/balatrobot.js";
 import { getDb, insertRun, recordMovesToDb } from "./db.js";
 import { printLeaderboard } from "./leaderboard.js";
 import { startRelay } from "../stream/relay.js";
+import { makeBenchRunIdentity } from "./run-naming.js";
 
 /**
  * Resolve a player (DecideFn) by name. Only the deterministic naive baseline
@@ -59,13 +60,13 @@ async function main() {
 
   for (const seed of cfg.seeds) {
     for (let k = 0; k < cfg.runsPerSeed; k++) {
-      const gameId = `${label}:${seed}:r${k}:${Date.now()}`;
+      const { gameId, logFileName } = makeBenchRunIdentity(label, seed, k);
       console.error(`\n→ ${gameId}`);
       const game = launchBalatro(cfg.basePort);
       if (cfg.launchMode !== "attach") await sleep(cfg.startupWaitMs);
 
       const client = new BalatroBotClient({ port: cfg.basePort, timeout: 30_000, retries: 3, retryDelay: 2000 });
-      const logStream = fs.createWriteStream(`logs/${label}-${seed}-r${k}.jsonl`, { flags: "w" });
+      const logStream = fs.createWriteStream(`logs/${logFileName}`, { flags: "wx" });
       try {
         await waitForHealth(client);
         // SAME seed across the K runs → isolates the model's own variance.

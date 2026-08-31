@@ -52,6 +52,76 @@ export interface RunOptions {
 
 const TERMINAL = new Set(["GAME_OVER", "MENU"]);
 
+const DEFAULT_MODEL_RECOVERY_DELAY_MS = 5 * 60 * 1000;
+const DEFAULT_MODEL_RECOVERY_MAX_RETRIES = 5;
+
+function nonNegativeEnvNumber(name: string, fallback: number, integer = false): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) return fallback;
+  return integer ? Math.floor(parsed) : parsed;
+}
+
+const MODEL_RECOVERY_DELAY_MS = nonNegativeEnvNumber(
+  "MODEL_RECOVERY_DELAY_MS",
+  DEFAULT_MODEL_RECOVERY_DELAY_MS,
+);
+
+const MODEL_RECOVERY_MAX_RETRIES = nonNegativeEnvNumber(
+  "MODEL_RECOVERY_MAX_RETRIES",
+  DEFAULT_MODEL_RECOVERY_MAX_RETRIES,
+  true,
+);
+
+const sleepForRecovery = (ms: number): Promise<void> =>
+  new Promise(resolve => setTimeout(resolve, ms));
+
+export function isRecoverableDecideError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  // openai-adapter has already exhausted its short transport retries.
+  return message.startsWith("chat request failed:");
+}
+
+export interface DecideRecoveryOptions {
+  delayMs?: number;
+  maxRetries?: number;
+  sleep?: (ms: number) => Promise<void>;
+  warn?: (message: string) => void;
+}
+
+/** Retry the same decision after a long inference-server recovery window. */
+export async function decideWithRecovery(
+  decide: DecideFn,
+  state: Parameters<DecideFn>[0],
+  ctx: Parameters<DecideFn>[1],
+  options: DecideRecoveryOptions = {},
+): Promise<Awaited<ReturnType<DecideFn>>> {
+  const delayMs = options.delayMs ?? MODEL_RECOVERY_DELAY_MS;
+  const maxRetries = options.maxRetries ?? MODEL_RECOVERY_MAX_RETRIES;
+  const sleep = options.sleep ?? sleepForRecovery;
+  const warn = options.warn ?? console.warn;
+  let recoveryAttempt = 0;
+
+  while (true) {
+    try {
+      return await decide(state, ctx);
+    } catch (error) {
+      if (!isRecoverableDecideError(error) || recoveryAttempt >= maxRetries) throw error;
+
+      recoveryAttempt++;
+      const message = error instanceof Error ? error.message : String(error);
+      warn(
+        `[LLM recovery] request failed: ${message}\n` +
+        `[LLM recovery] attempt ${recoveryAttempt}/${maxRetries}; sleeping ` +
+        `${Math.round(delayMs / 60_000)} min`,
+      );
+      await sleep(delayMs);
+      warn("[LLM recovery] retrying the same decision...");
+    }
+  }
+}
+
 /** Signature of the meaningful game state — used to detect no-progress loops. */
 function progressSig(s: SummarizedState): string {
   const cards = (a: { key: string; enhancement?: string | null; edition?: string | null; seal?: string | null }[]) =>
@@ -125,9 +195,10 @@ export async function runGame(decide: DecideFn, opts: RunOptions): Promise<RunRe
 
       let decision: Decision;
       try {
-        decision = await decide(state, ctx);
-      } catch (e: any) {
-        rec.error = `decide failed: ${e.message}`;
+        decision = await decideWithRecovery(decide, state, ctx);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        rec.error = `decide failed: ${message}`;
         break;
       }
 
