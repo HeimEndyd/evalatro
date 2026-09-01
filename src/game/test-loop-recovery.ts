@@ -17,6 +17,7 @@ check("game/parse failures are not recoverable", !isRecoverableDecideError(new E
 let calls = 0;
 const sleeps: number[] = [];
 const warnings: string[] = [];
+const events: string[] = [];
 const flaky: DecideFn = async (seenState, seenCtx) => {
   check("retry keeps the same state", seenState === state);
   check("retry keeps the same context", seenCtx === ctx);
@@ -30,10 +31,12 @@ const recovered = await decideWithRecovery(flaky, state, ctx, {
   maxRetries: 5,
   sleep: async ms => { sleeps.push(ms); },
   warn: message => { warnings.push(message); },
+  event: event => { events.push(event.type); },
 });
 check("recoverable request eventually returns decision", recovered.tool === "play_hand");
 check("two failures cause two delayed retries", calls === 3 && sleeps.join(",") === "17,17");
 check("recovery emits attempt and retry diagnostics", warnings.length === 4);
+check("recovery emits structured chronology", events.join(",") === "request_start,request_failed,recovery_wait,recovery_retry,request_start,request_failed,recovery_wait,recovery_retry,request_start,request_end");
 
 let terminalCalls = 0;
 const terminal: DecideFn = async () => {

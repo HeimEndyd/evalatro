@@ -11,6 +11,8 @@ import { getDb, insertRun, recordMovesToDb } from "./db.js";
 import { printLeaderboard } from "./leaderboard.js";
 import { startRelay } from "../stream/relay.js";
 import { makeBenchRunIdentity } from "./run-naming.js";
+import { createProgressLog } from "./progress-log.js";
+import * as path from "path";
 
 /**
  * Resolve a player (DecideFn) by name. Only the deterministic naive baseline
@@ -66,21 +68,35 @@ async function main() {
       if (cfg.launchMode !== "attach") await sleep(cfg.startupWaitMs);
 
       const client = new BalatroBotClient({ port: cfg.basePort, timeout: 30_000, retries: 3, retryDelay: 2000 });
-      const logStream = fs.createWriteStream(`logs/${logFileName}`, { flags: "wx" });
+      const rawLogPath = path.resolve("logs", logFileName);
+      const logStream = fs.createWriteStream(rawLogPath, { flags: "wx" });
+      const progress = createProgressLog(logFileName.replace(/\.jsonl$/, ""));
+      let stage = "endpoint_health";
       try {
+        progress.write({ type: "endpoint_health_check", gameId, model: label, seed, endpoint: `http://127.0.0.1:${cfg.basePort}` });
         await waitForHealth(client);
+        progress.write({ type: "endpoint_health_ok", gameId, model: label, seed, endpoint: `http://127.0.0.1:${cfg.basePort}` });
+        stage = "game";
         // SAME seed across the K runs → isolates the model's own variance.
-        const rec = await runGame(decide, { client, model: label, gameId, seed, logStream });
+        const rec = await runGame(decide, {
+          client, model: label, gameId, seed, logStream,
+          progress: progress.write, rawLogPath, dbPath: path.resolve(process.env.BENCH_DB || "bench/bench.db"),
+        });
+        stage = "db_persist";
         insertRun(db, rec, "bench");
+        progress.write({ type: "db_persisted", gameId, model: label, seed, db: path.resolve(process.env.BENCH_DB || "bench/bench.db") });
+        stage = "submit";
         await maybeSubmit(db, rec, model, cfg);
         console.error(
           `  ante=${rec.maxAnte} actions=${rec.actions} illegal=${rec.illegalActions}` +
           (rec.error ? ` ERROR: ${rec.error}` : ""),
         );
       } catch (e: any) {
+        progress.write({ type: "run_failed", gameId, model: label, seed, stage, error: e.message, rawLog: rawLogPath });
         console.error(`  FAILED: ${e.message}`);
       } finally {
         logStream.end();
+        progress.close();
         game.stop();
         await sleep(3000);
       }

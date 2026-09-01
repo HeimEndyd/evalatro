@@ -6,6 +6,7 @@ import { DecideFn, DecideCtx, Decision } from "./decide.js";
 import { globalBus, EventBus } from "../bus/index.js";
 import { loadConfig } from "../config.js";
 import { scoreFromTranscriptForTarget, MoveSnapshot } from "../scoring/score.js";
+import { compactGameState, ProgressSink } from "../bench/progress-log.js";
 
 /** One row of benchmark results — also the shape persisted to SQLite. */
 export interface RunRecord {
@@ -48,6 +49,10 @@ export interface RunOptions {
   bus?: EventBus;
   /** Optional JSONL sink for full replay logs. */
   logStream?: fs.WriteStream;
+  /** Compact append-only operational chronology; raw replay stays in logStream. */
+  progress?: ProgressSink;
+  rawLogPath?: string;
+  dbPath?: string;
 }
 
 const TERMINAL = new Set(["GAME_OVER", "MENU"]);
@@ -88,6 +93,15 @@ export interface DecideRecoveryOptions {
   maxRetries?: number;
   sleep?: (ms: number) => Promise<void>;
   warn?: (message: string) => void;
+  event?: (event: ProgressEvent) => void;
+}
+
+export interface ProgressEvent {
+  type: "request_start" | "request_failed" | "recovery_wait" | "recovery_retry" | "request_end";
+  attempt: number;
+  elapsedMs: number;
+  error?: string;
+  delayMs?: number;
 }
 
 /** Retry the same decision after a long inference-server recovery window. */
@@ -101,23 +115,31 @@ export async function decideWithRecovery(
   const maxRetries = options.maxRetries ?? MODEL_RECOVERY_MAX_RETRIES;
   const sleep = options.sleep ?? sleepForRecovery;
   const warn = options.warn ?? console.warn;
+  const event = options.event;
   let recoveryAttempt = 0;
+  const started = Date.now();
 
   while (true) {
+    event?.({ type: "request_start", attempt: recoveryAttempt + 1, elapsedMs: Date.now() - started });
     try {
-      return await decide(state, ctx);
+      const decision = await decide(state, ctx);
+      event?.({ type: "request_end", attempt: recoveryAttempt + 1, elapsedMs: Date.now() - started });
+      return decision;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      event?.({ type: "request_failed", attempt: recoveryAttempt + 1, elapsedMs: Date.now() - started, error: message });
       if (!isRecoverableDecideError(error) || recoveryAttempt >= maxRetries) throw error;
 
       recoveryAttempt++;
-      const message = error instanceof Error ? error.message : String(error);
       warn(
         `[LLM recovery] request failed: ${message}\n` +
         `[LLM recovery] attempt ${recoveryAttempt}/${maxRetries}; sleeping ` +
         `${Math.round(delayMs / 60_000)} min`,
       );
+      event?.({ type: "recovery_wait", attempt: recoveryAttempt, elapsedMs: Date.now() - started, delayMs, error: message });
       await sleep(delayMs);
       warn("[LLM recovery] retrying the same decision...");
+      event?.({ type: "recovery_retry", attempt: recoveryAttempt, elapsedMs: Date.now() - started });
     }
   }
 }
@@ -155,6 +177,13 @@ export async function runGame(decide: DecideFn, opts: RunOptions): Promise<RunRe
     error: null, ts: Date.now(),
   };
   const t0 = Date.now();
+  const progress = (event: Record<string, unknown> & { type: string }) => opts.progress?.({
+    gameId, model, seed, elapsedMs: Date.now() - t0, ...event,
+  });
+  progress({
+    type: "game_start", deck, stake, targetAnte,
+    rawLog: opts.rawLogPath ?? null, db: opts.dbPath ?? null,
+  });
 
   const log = (obj: unknown) => opts.logStream?.write(JSON.stringify(obj) + "\n");
   const emitState = (state: SummarizedState) => {
@@ -192,13 +221,18 @@ export async function runGame(decide: DecideFn, opts: RunOptions): Promise<RunRe
 
       const legalActions = computeLegalActions(state.state).actions;
       const ctx: DecideCtx = { step, legalActions, notes, lastError, lastAction };
+      const decisionStarted = Date.now();
+      progress({ type: "decision_start", step, legalActions, state: compactGameState(state) });
 
       let decision: Decision;
       try {
-        decision = await decideWithRecovery(decide, state, ctx);
+        decision = await decideWithRecovery(decide, state, ctx, {
+          event: ({ type, ...event }) => progress({ type: `decision_${type}`, step, ...event }),
+        });
       } catch (e: unknown) {
         const message = e instanceof Error ? e.message : String(e);
         rec.error = `decide failed: ${message}`;
+        progress({ type: "decision_error", step, error: message });
         break;
       }
 
@@ -239,6 +273,19 @@ export async function runGame(decide: DecideFn, opts: RunOptions): Promise<RunRe
       log({
         ts: Date.now(), type: "decision", gameId, model, seed, step,
         reasoning: decision.reasoning, action: { tool: decision.tool, args: decision.args }, legalActions, diagnostic: decision.diagnostic, illegal,
+      });
+      progress({
+        type: "decision_end", step,
+        durationMs: Date.now() - decisionStarted,
+        reasoning: decision.reasoning ?? "",
+        action: { tool: decision.tool, args: decision.args },
+        usage: decision.usage ?? null,
+        illegal: illegal ?? null,
+        counters: {
+          actions: rec.actions, illegal: rec.illegalActions,
+          tokensIn: rec.tokensIn, tokensOut: rec.tokensOut,
+        },
+        stateAfter: compactGameState(state),
       });
       emitState(state);
       if (state.ante >= targetAnte + 1) break;
@@ -290,5 +337,12 @@ export async function runGame(decide: DecideFn, opts: RunOptions): Promise<RunRe
     finalAnte: rec.maxAnte, finalRound: rec.finalRound, dollars: rec.finalMoney,
   });
   log({ ts: Date.now(), type: "result", gameId, model, seed, record: rec });
+  progress({
+    type: "game_end", outcome: rec.outcome, error: rec.error,
+    durationMs: rec.durationMs, actions: rec.actions, illegal: rec.illegalActions,
+    tokensIn: rec.tokensIn, tokensOut: rec.tokensOut, score: rec.score,
+    finalState: rec.finalState ? compactGameState(rec.finalState) : null,
+    rawLog: opts.rawLogPath ?? null, db: opts.dbPath ?? null,
+  });
   return rec;
 }
