@@ -8,11 +8,20 @@ import { ACTION_TOOLS, openAiTools } from "../tools/registry.js";
 const SYSTEM_PROMPT_PATH = "src/agent/SYSTEM_PROMPT.md";
 const DEFAULT_MAX_TOKENS = 16_384;
 const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 120_000;
+const DEFAULT_MODEL_REQUEST_MAX_RETRIES = 2;
 const LLM_REQUEST_TIMEOUT_MS = (() => {
   const raw = process.env.LLM_REQUEST_TIMEOUT_MS;
   const timeout = raw ? Number(raw) : DEFAULT_LLM_REQUEST_TIMEOUT_MS;
   return Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_LLM_REQUEST_TIMEOUT_MS;
 })();
+export function parseModelRequestMaxRetries(raw: string | undefined): number {
+  if (raw === undefined || raw === "") return DEFAULT_MODEL_REQUEST_MAX_RETRIES;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : DEFAULT_MODEL_REQUEST_MAX_RETRIES;
+}
+const MODEL_REQUEST_MAX_RETRIES = parseModelRequestMaxRetries(process.env.MODEL_REQUEST_MAX_RETRIES);
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
 // ── Shapes of the OpenAI-compatible chat/completions response ──
@@ -317,7 +326,7 @@ async function callChat(
   apiKey: string | undefined,
   extraHeaders: Record<string, string> | undefined,
   payload: unknown,
-  retries = 2,
+  retries = MODEL_REQUEST_MAX_RETRIES,
 ): Promise<ChatResponse> {
   let lastErr: Error | null = null;
   let currentPayload = payload;

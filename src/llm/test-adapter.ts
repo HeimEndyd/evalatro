@@ -5,6 +5,7 @@ import {
   buildChatPayload,
   retryOptionsForDecision,
   sanitizePayloadForProviderError,
+  parseModelRequestMaxRetries,
 } from "./openai-adapter.js";
 import { openAiTools } from "../tools/registry.js";
 import { ModelConfig } from "../config.js";
@@ -101,6 +102,13 @@ check("reasoning kwargs are omitted by default", !Object.prototype.hasOwnPropert
 eq("no_tool_call retry requires a tool", retryOptionsForDecision({ tool: "no_tool_call" }), { toolChoice: "required" });
 eq("length no_tool_call retry requires a tool", retryOptionsForDecision({ tool: "no_tool_call_length" }), { toolChoice: "required" });
 eq("normal tool call does not retry", retryOptionsForDecision({ tool: "play_hand" }), null);
+
+console.log("\ntransport retry policy:");
+eq("transport retries default to two", parseModelRequestMaxRetries(undefined), 2);
+eq("transport retries can be disabled for hardware qualification", parseModelRequestMaxRetries("0"), 0);
+eq("transport retries are integer and non-negative", parseModelRequestMaxRetries("3.9"), 3);
+eq("invalid transport retry policy uses the default", parseModelRequestMaxRetries("invalid"), 2);
+eq("negative transport retry policy uses the default", parseModelRequestMaxRetries("-1"), 2);
 
 console.log("\njson mode:");
 d = parseChatResponse(jsonCfg, {

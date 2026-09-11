@@ -42,6 +42,8 @@ async function main() {
   const modelName = args.find(a => !a.startsWith("--"));
   // `--watch` can be swallowed by PowerShell/npm `--` forwarding, so also honor WATCH=1.
   const watch = args.includes("--watch") || !!process.env.WATCH;
+  const failFast = args.includes("--fail-fast") ||
+    ["1", "true", "yes"].includes((process.env.EVALATRO_FAIL_FAST ?? "").toLowerCase());
 
   const { label, decide, model } = resolvePlayer(modelName);
   if (args.includes("--no-submit")) cfg.submit = false;
@@ -94,6 +96,7 @@ async function main() {
       } catch (e: any) {
         progress.write({ type: "run_failed", gameId, model: label, seed, stage, error: e.message, rawLog: rawLogPath });
         console.error(`  FAILED: ${e.message}`);
+        if (failFast) throw e;
       } finally {
         logStream.end();
         progress.close();
