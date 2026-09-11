@@ -4,6 +4,7 @@ import {
   ChatResponse,
   buildChatPayload,
   retryOptionsForDecision,
+  retryOptionsForProviderError,
   sanitizePayloadForProviderError,
   parseModelRequestMaxRetries,
 } from "./openai-adapter.js";
@@ -102,6 +103,27 @@ check("reasoning kwargs are omitted by default", !Object.prototype.hasOwnPropert
 eq("no_tool_call retry requires a tool", retryOptionsForDecision({ tool: "no_tool_call" }), { toolChoice: "required" });
 eq("length no_tool_call retry requires a tool", retryOptionsForDecision({ tool: "no_tool_call_length" }), { toolChoice: "required" });
 eq("normal tool call does not retry", retryOptionsForDecision({ tool: "play_hand" }), null);
+eq(
+  "peg-native server format error can opt into one required-tool retry",
+  retryOptionsForProviderError(
+    new Error("chat request failed: HTTP 500: The model produced output that does not match the expected peg-native format"),
+    true,
+  ),
+  { toolChoice: "required" },
+);
+eq(
+  "peg-native server format retry is disabled for strict qualification",
+  retryOptionsForProviderError(
+    new Error("chat request failed: HTTP 500: The model produced output that does not match the expected peg-native format"),
+    false,
+  ),
+  null,
+);
+eq(
+  "unrelated server errors are not hidden by the format retry",
+  retryOptionsForProviderError(new Error("chat request failed: HTTP 500: device lost"), true),
+  null,
+);
 
 console.log("\ntransport retry policy:");
 eq("transport retries default to two", parseModelRequestMaxRetries(undefined), 2);

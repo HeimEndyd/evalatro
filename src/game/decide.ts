@@ -15,6 +15,7 @@ export interface Decision {
     finishReason?: string | null;
     cause?: "length" | "no_tool_call" | "bad_tool_args" | "parse_error" | "no_response" | null;
     retried?: boolean;
+    retryCause?: "missing_tool_call" | "server_peg_native_format";
     contentLength?: number;
     reasoningLength?: number;
     rawToolCallsCount?: number;

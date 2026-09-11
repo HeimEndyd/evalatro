@@ -9,6 +9,7 @@ const SYSTEM_PROMPT_PATH = "src/agent/SYSTEM_PROMPT.md";
 const DEFAULT_MAX_TOKENS = 16_384;
 const DEFAULT_LLM_REQUEST_TIMEOUT_MS = 120_000;
 const DEFAULT_MODEL_REQUEST_MAX_RETRIES = 2;
+const MODEL_PEG_NATIVE_FORMAT_RETRY = process.env.MODEL_PEG_NATIVE_FORMAT_RETRY === "1";
 const LLM_REQUEST_TIMEOUT_MS = (() => {
   const raw = process.env.LLM_REQUEST_TIMEOUT_MS;
   const timeout = raw ? Number(raw) : DEFAULT_LLM_REQUEST_TIMEOUT_MS;
@@ -298,6 +299,17 @@ export function retryOptionsForDecision(decision: Pick<Decision, "tool">): { too
     : null;
 }
 
+const PEG_NATIVE_FORMAT_ERROR = "The model produced output that does not match the expected peg-native format";
+
+export function retryOptionsForProviderError(
+  error: unknown,
+  enabled = MODEL_PEG_NATIVE_FORMAT_RETRY,
+): { toolChoice: "required" } | null {
+  if (!enabled) return null;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes(PEG_NATIVE_FORMAT_ERROR) ? { toolChoice: "required" } : null;
+}
+
 type DroppablePayloadField = "tool_choice" | "response_format" | "temperature" | "max_tokens";
 
 function fieldForProviderError(message: string): DroppablePayloadField | null {
@@ -399,7 +411,28 @@ export function makeOpenAiPlayer(cfg: ModelConfig): DecideFn {
 
   return async (state: SummarizedState, ctx: DecideCtx): Promise<Decision> => {
     const payload = buildChatPayload(cfg, systemContent, state, ctx);
-    const json = await callChat(endpoint, apiKey, cfg.extraHeaders, payload);
+    let json: ChatResponse;
+    try {
+      json = await callChat(endpoint, apiKey, cfg.extraHeaders, payload);
+    } catch (error) {
+      const retryOpts = cfg.mode === "tools" ? retryOptionsForProviderError(error) : null;
+      if (!retryOpts) throw error;
+
+      const retryCtx: DecideCtx = {
+        ...ctx,
+        lastError: "The previous response ended without a complete tool call. Keep the reasoning short and call exactly one valid tool.",
+        lastAction: undefined,
+      };
+      const retryPayload = buildChatPayload(cfg, systemContent, state, retryCtx, retryOpts);
+      const retryJson = await callChat(endpoint, apiKey, cfg.extraHeaders, retryPayload, 0);
+      const retry = parseChatResponse(cfg, retryJson);
+      retry.diagnostic = {
+        ...(retry.diagnostic ?? {}),
+        retried: true,
+        retryCause: "server_peg_native_format",
+      };
+      return retry;
+    }
     const decision = parseChatResponse(cfg, json);
     const retryOpts = retryOptionsForDecision(decision);
     if (cfg.mode !== "tools" || !retryOpts) return decision;
@@ -422,7 +455,11 @@ export function makeOpenAiPlayer(cfg: ModelConfig): DecideFn {
       tokensOut: (decision.usage?.tokensOut ?? 0) + (retry.usage?.tokensOut ?? 0),
       costUsd: (decision.usage?.costUsd ?? 0) + (retry.usage?.costUsd ?? 0),
     };
-    retry.diagnostic = { ...(retry.diagnostic ?? {}), retried: true };
+    retry.diagnostic = {
+      ...(retry.diagnostic ?? {}),
+      retried: true,
+      retryCause: "missing_tool_call",
+    };
     return retry;
   };
 }

@@ -216,6 +216,10 @@ tool call and gracefully drops provider fields such as `tool_choice` or `respons
 server rejects them. If `.env` has no active model settings, real-model commands stop instead of silently falling
 back to `naive`.
 
+For a llama.cpp tools endpoint, `MODEL_PEG_NATIVE_FORMAT_RETRY=1` enables one immediate retry of the
+same game decision with `tool_choice=required` when the server rejects an unfinished response with its exact
+`peg-native` format error. It does not retry unrelated HTTP 5xx, timeouts, or transport failures.
+
 For llama.cpp servers whose Jinja chat template supports it, set `MODEL_REASONING_EFFORT` to `off`, `low`,
 `medium`, or `high`. Named presets use the equivalent `reasoningEffort` property. Evalatro sends this as
 `chat_template_kwargs.reasoning_effort`; leave it unset for providers or templates that do not support that field.
