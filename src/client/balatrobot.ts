@@ -1,10 +1,15 @@
 import { request } from "undici";
 import * as fs from "fs";
 
+export class BalatroBotTransportError extends Error {}
+export class BalatroBotRpcError extends Error {}
+
 export interface BalatroBotConfig {
   host: string;
   port: number;
   timeout: number;
+  playTimeout: number;
+  mutationTimeout: number;
   retries: number;
   retryDelay: number;
 }
@@ -19,6 +24,8 @@ export class BalatroBotClient {
       host: config.host ?? "127.0.0.1",
       port: config.port ?? 12346,
       timeout: config.timeout ?? 10000,
+      playTimeout: config.playTimeout ?? config.timeout ?? 10000,
+      mutationTimeout: config.mutationTimeout ?? config.timeout ?? 10000,
       retries: config.retries ?? 3,
       retryDelay: config.retryDelay ?? 1000,
     };
@@ -42,34 +49,43 @@ export class BalatroBotClient {
 
   private async call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     let lastError: Error | null = null;
-    for (let attempt = 0; attempt <= this.config.retries; attempt++) {
+    // A timed-out mutation may already have taken effect. Never replay it.
+    const retries = ["health", "gamestate"].includes(method) ? this.config.retries : 0;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const controller = new AbortController();
+      const timeout = method === "play" ? this.config.playTimeout
+        : retries > 0 ? this.config.timeout : this.config.mutationTimeout;
+      const timer = setTimeout(() => controller.abort(), timeout);
       try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), this.config.timeout);
         const response = await request(this.baseUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
           signal: controller.signal,
         });
-        clearTimeout(timer);
         const body = await response.body.json() as { result?: T; error?: { message: string; data?: { name: string } } };
+        if (response.statusCode >= 400) throw new Error(`HTTP ${response.statusCode}`);
         if (body.error) {
-          const err = new Error(`balatrobot error: ${body.error.data?.name ?? "UNKNOWN"} - ${body.error.message}`);
+          const err = new BalatroBotRpcError(`balatrobot error: ${body.error.data?.name ?? "UNKNOWN"} - ${body.error.message}`);
           this.logEntry(method, params, null, err.message);
           throw err;
         }
         this.logEntry(method, params, body.result);
         return body.result as T;
       } catch (e: any) {
-        lastError = e;
-        if (attempt < this.config.retries) {
+        if (e instanceof BalatroBotRpcError) throw e;
+        lastError = controller.signal.aborted
+          ? new Error(`timeout after ${timeout}ms`, { cause: e })
+          : e;
+        if (attempt < retries) {
           await new Promise(r => setTimeout(r, this.config.retryDelay * (attempt + 1)));
         }
+      } finally {
+        clearTimeout(timer);
       }
     }
     this.logEntry(method, params, null, lastError!.message);
-    throw lastError!;
+    throw new BalatroBotTransportError(`game transport failed (${method}): ${lastError!.message}`, { cause: lastError });
   }
 
   health(): Promise<{ status: string }> { return this.call("health"); }

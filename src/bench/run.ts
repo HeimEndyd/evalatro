@@ -37,6 +37,16 @@ function resolvePlayer(modelName?: string): { label: string; decide: DecideFn; m
 }
 
 async function main() {
+  const playTimeoutMs = process.env.BALATROBOT_PLAY_TIMEOUT_MS === undefined
+    ? 300_000 : Number(process.env.BALATROBOT_PLAY_TIMEOUT_MS);
+  if (!Number.isSafeInteger(playTimeoutMs) || playTimeoutMs < 30_000 || playTimeoutMs > 300_000) {
+    throw new Error("BALATROBOT_PLAY_TIMEOUT_MS must be an integer from 30000 to 300000");
+  }
+  const mutationTimeoutMs = process.env.BALATROBOT_MUTATION_TIMEOUT_MS === undefined
+    ? 300_000 : Number(process.env.BALATROBOT_MUTATION_TIMEOUT_MS);
+  if (!Number.isSafeInteger(mutationTimeoutMs) || mutationTimeoutMs < 30_000 || mutationTimeoutMs > 300_000) {
+    throw new Error("BALATROBOT_MUTATION_TIMEOUT_MS must be an integer from 30000 to 300000");
+  }
   const cfg = loadConfig();
   const args = process.argv.slice(2);
   const modelName = args.find(a => !a.startsWith("--"));
@@ -69,7 +79,7 @@ async function main() {
       const game = launchBalatro(cfg.basePort);
       if (cfg.launchMode !== "attach") await sleep(cfg.startupWaitMs);
 
-      const client = new BalatroBotClient({ port: cfg.basePort, timeout: 30_000, retries: 3, retryDelay: 2000 });
+      const client = new BalatroBotClient({ port: cfg.basePort, timeout: 30_000, playTimeout: playTimeoutMs, mutationTimeout: mutationTimeoutMs, retries: 3, retryDelay: 2000 });
       const rawLogPath = path.resolve("logs", logFileName);
       const logStream = fs.createWriteStream(rawLogPath, { flags: "wx" });
       const progress = createProgressLog(logFileName.replace(/\.jsonl$/, ""));
@@ -88,7 +98,8 @@ async function main() {
         insertRun(db, rec, "bench");
         progress.write({ type: "db_persisted", gameId, model: label, seed, db: path.resolve(process.env.BENCH_DB || "bench/bench.db") });
         stage = "submit";
-        await maybeSubmit(db, rec, model, cfg);
+        if (["won", "lost", "stuck"].includes(rec.outcome)) await maybeSubmit(db, rec, model, cfg);
+        if (failFast && rec.outcome === "error") throw new Error(rec.error ?? "game failed");
         console.error(
           `  ante=${rec.maxAnte} actions=${rec.actions} illegal=${rec.illegalActions}` +
           (rec.error ? ` ERROR: ${rec.error}` : ""),

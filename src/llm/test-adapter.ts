@@ -68,6 +68,7 @@ d = parseChatResponse(toolsCfg, {
   choices: [{ message: { content: "buying for mult build", tool_calls: [{ function: { name: "shop_buy", arguments: '{"card":0,"notes":"Build around flat mult; prioritize reliable pair/two-pair scoring."}' } }] } }],
 } as ChatResponse);
 eq("tool notes become carried memory", d.notes, "Build around flat mult; prioritize reliable pair/two-pair scoring.");
+eq("tool notes source is explicit", d.notesSource, "explicit");
 eq("tool notes are stripped from game args", d.args, { card: 0 });
 
 d = parseChatResponse(toolsCfg, { choices: [{ message: { content: "just chatting" } }] } as ChatResponse);
@@ -95,10 +96,20 @@ payload = buildChatPayload({ ...toolsCfg, maxTokens: 1_000_000 }, "system", { st
 eq("max_tokens follows the configured per-turn limit", payload.max_tokens, 1_000_000);
 
 payload = buildChatPayload({ ...toolsCfg, reasoningEffort: "off" }, "system", { state: "SHOP" } as any, { step: 1, legalActions: ["shop_buy"] });
-eq("reasoning effort is sent through llama.cpp chat template kwargs", payload.chat_template_kwargs, { reasoning_effort: "off" });
+eq("reasoning effort is sent through the public top-level control", payload.reasoning_effort, "off");
+eq("reasoning effort is also sent through chat template kwargs", payload.chat_template_kwargs, { reasoning_effort: "off" });
 
 payload = buildChatPayload(toolsCfg, "system", { state: "SHOP" } as any, { step: 1, legalActions: ["shop_buy"] });
 check("reasoning kwargs are omitted by default", !Object.prototype.hasOwnProperty.call(payload, "chat_template_kwargs"));
+
+payload = buildChatPayload({ ...toolsCfg, reasoningEffort: "high", enableThinking: true }, "system", { state: "SHOP" } as any, { step: 1, legalActions: ["shop_buy"] });
+eq("thinking high keeps the public proxy control", payload.reasoning_effort, "high");
+eq("thinking high overrides a server thinking-off default", payload.chat_template_kwargs, { reasoning_effort: "high", enable_thinking: true });
+payload = buildChatPayload({ ...toolsCfg, reasoningEffort: "xhigh", enableThinking: true }, "system", { state: "SHOP" } as any, { step: 1, legalActions: ["shop_buy"] });
+eq("xhigh keeps the public proxy control", payload.reasoning_effort, "xhigh");
+eq("xhigh is sent through chat template kwargs", payload.chat_template_kwargs, { reasoning_effort: "xhigh", enable_thinking: true });
+payload = buildChatPayload({ ...toolsCfg, enableThinking: false }, "system", { state: "SHOP" } as any, { step: 1, legalActions: ["shop_buy"] });
+eq("explicit thinking false is retained", payload.chat_template_kwargs, { enable_thinking: false });
 
 eq("no_tool_call retry requires a tool", retryOptionsForDecision({ tool: "no_tool_call" }), { toolChoice: "required" });
 eq("length no_tool_call retry requires a tool", retryOptionsForDecision({ tool: "no_tool_call_length" }), { toolChoice: "required" });
@@ -140,6 +151,7 @@ d = parseChatResponse(jsonCfg, {
 eq("fenced json -> tool", d.tool, "discard");
 eq("fenced json -> args", d.args, { cards: [3] });
 eq("explicit notes kept", d.notes, "keep flush");
+eq("json notes source is explicit", d.notesSource, "explicit");
 eq("cost = 1M*$1 + 1M*$2", d.usage?.costUsd, 3);
 
 d = parseChatResponse(jsonCfg, { choices: [{ message: { content: 'Sure! {"tool":"cash_out","args":{}} hope it helps' } }] } as ChatResponse);
@@ -153,6 +165,7 @@ eq("json mode falls back from content to reasoning_content", d.tool, "discard");
 
 d = parseChatResponse(jsonCfg, { choices: [{ message: { content: '{"reasoning":"r","tool":"select_blind","args":{}}' } }] } as ChatResponse);
 eq("notes falls back to reasoning", d.notes, "r");
+eq("fallback notes source is reasoning", d.notesSource, "reasoning");
 
 console.log("\nextractJson:");
 eq("nested braces", extractJson('prefix {"a":{"b":1},"c":2} suffix'), { a: { b: 1 }, c: 2 });

@@ -8,6 +8,8 @@ export interface Decision {
   reasoning?: string;
   /** Optional scratchpad carried to the next turn (cheap long-horizon memory). */
   notes?: string;
+  /** Origin of the text carried to the next turn. */
+  notesSource?: "explicit" | "reasoning" | "none";
   /** Token/cost accounting, filled by LLM adapters (naive player leaves empty). */
   usage?: { tokensIn: number; tokensOut: number; costUsd?: number };
   /** Adapter diagnostics for provider-format failures and truncation analysis. */

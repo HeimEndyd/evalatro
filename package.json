@@ -21,7 +21,7 @@
     "test:loop-recovery": "node dist/game/test-loop-recovery.js",
     "test:progress-log": "node dist/bench/test-progress-log.js",
     "test:setup": "node scripts/setup-local.test.mjs",
-    "test": "node scripts/setup-local.test.mjs && node dist/llm/test-adapter.js && node dist/scoring/test-score.js && node dist/bench/test-run-naming.js && node dist/game/test-loop-recovery.js && node dist/bench/test-progress-log.js",
+    "test": "node scripts/setup-local.test.mjs && node dist/llm/test-adapter.js && node dist/scoring/test-score.js && node dist/bench/test-run-naming.js && node dist/game/test-loop-recovery.js && node dist/bench/test-progress-log.js && node dist/client/test-transport.js && node dist/test-submit.js",
     "probe": "node dist/llm/probe.js",
     "codehash": "node dist/scoring/print-codehash.js",
     "serve": "node dist/serve.js",
@@ -31,7 +31,9 @@
     "setup:local": "node scripts/setup-local.mjs",
     "setup:check": "node scripts/setup-local.mjs --check",
     "setup:install": "node scripts/setup-local.mjs --install --yes",
-    "setup:uninstall": "node scripts/setup-local.mjs --uninstall --yes"
+    "setup:uninstall": "node scripts/setup-local.mjs --uninstall --yes",
+    "test:transport": "node dist/client/test-transport.js",
+    "test:submit": "node dist/test-submit.js"
   },
   "keywords": [
     "balatro",

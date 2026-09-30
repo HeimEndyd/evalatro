@@ -25,17 +25,17 @@ function loadDotEnv(): void {
 }
 loadDotEnv();
 
-const REASONING_EFFORTS = ["off", "low", "medium", "high"] as const;
+const REASONING_EFFORTS = ["off", "low", "medium", "high", "xhigh"] as const;
 export type ReasoningEffort = typeof REASONING_EFFORTS[number];
 
 function parseReasoningEffort(raw: unknown, source: string): ReasoningEffort | undefined {
   if (raw === undefined || raw === null || raw === "") return undefined;
   if (typeof raw !== "string") {
-    throw new Error(`Invalid ${source}; expected off, low, medium, or high.`);
+    throw new Error(`Invalid ${source}; expected off, low, medium, high, or xhigh.`);
   }
   const value = raw.trim().toLowerCase();
   if (!REASONING_EFFORTS.includes(value as ReasoningEffort)) {
-    throw new Error(`Invalid ${source}="${raw}"; expected off, low, medium, or high.`);
+    throw new Error(`Invalid ${source}="${raw}"; expected off, low, medium, high, or xhigh.`);
   }
   return value as ReasoningEffort;
 }
@@ -71,6 +71,8 @@ export interface ModelConfig {
    * templates that do not support it.
    */
   reasoningEffort?: ReasoningEffort;
+  /** Explicit template thinking switch, overriding server defaults when set. */
+  enableThinking?: boolean;
   /** Extra HTTP headers (e.g. OpenRouter ranking headers). */
   extraHeaders?: Record<string, string>;
   /** Set false to keep the entry in the file but skip it in runs. */
@@ -273,6 +275,10 @@ export function envModel(): ModelConfig | null {
   const model = process.env.MODEL;
   if (!baseURL || !model) return null;
   const reasoningEffort = parseReasoningEffort(process.env.MODEL_REASONING_EFFORT, "MODEL_REASONING_EFFORT");
+  const thinking = process.env.MODEL_ENABLE_THINKING;
+  if (thinking !== undefined && thinking !== "true" && thinking !== "false") {
+    throw new Error("MODEL_ENABLE_THINKING must be true or false");
+  }
   return {
     name: process.env.MODEL_NAME || model,
     baseURL,
@@ -282,6 +288,7 @@ export function envModel(): ModelConfig | null {
     temperature: process.env.MODEL_TEMPERATURE ? Number(process.env.MODEL_TEMPERATURE) : undefined,
     maxTokens: process.env.MODEL_MAX_TOKENS ? Number(process.env.MODEL_MAX_TOKENS) : undefined,
     reasoningEffort,
+    enableThinking: thinking === undefined ? undefined : thinking === "true",
     enabled: true,
   };
 }

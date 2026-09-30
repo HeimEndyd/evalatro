@@ -14,6 +14,8 @@ export interface StateEvent extends GameEvent {
 export interface DecisionEvent extends GameEvent {
   type: "decision";
   reasoning: string;
+  notes?: string;
+  notesSource?: "explicit" | "reasoning" | "none";
   action: { tool: string; args: Record<string, unknown> };
   legalActions: string[];
   state: Record<string, unknown>;

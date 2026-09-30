@@ -208,6 +208,7 @@ export function parseChatResponse(cfg: ModelConfig, json: ChatResponse): Decisio
         args: {},
         reasoning: why,
         notes: think || undefined,
+        notesSource: think ? "reasoning" : "none",
         usage,
         diagnostic: { ...baseDiagnostic, cause: lengthCutoff ? "length" : "no_tool_call" },
       };
@@ -225,7 +226,7 @@ export function parseChatResponse(cfg: ModelConfig, json: ChatResponse): Decisio
       };
     }
     const split = splitToolNotes(args);
-    return { tool: call.function.name, args: split.args, reasoning: think, notes: split.notes ?? (think || undefined), usage, diagnostic: baseDiagnostic };
+    return { tool: call.function.name, args: split.args, reasoning: think, notes: split.notes ?? (think || undefined), notesSource: split.notes ? "explicit" : think ? "reasoning" : "none", usage, diagnostic: baseDiagnostic };
   }
 
   // mode === "json"
@@ -247,6 +248,7 @@ export function parseChatResponse(cfg: ModelConfig, json: ChatResponse): Decisio
     args: parsed.args && typeof parsed.args === "object" ? parsed.args : {},
     reasoning,
     notes: typeof parsed.notes === "string" ? parsed.notes : (reasoning || undefined),
+    notesSource: typeof parsed.notes === "string" ? "explicit" : reasoning ? "reasoning" : "none",
     usage,
     diagnostic: baseDiagnostic,
   };
@@ -282,7 +284,18 @@ export function buildChatPayload(
     max_tokens: cfg.maxTokens ?? DEFAULT_MAX_TOKENS,
   };
   if (cfg.reasoningEffort) {
+    // Managed LiteLLM treats the public top-level field as authoritative and
+    // deliberately ignores client chat_template_kwargs when selecting the
+    // reasoning mode. Keep both forms: the public control for proxies and the
+    // template kwarg for direct llama.cpp/vLLM endpoints.
+    payload.reasoning_effort = cfg.reasoningEffort;
     payload.chat_template_kwargs = { reasoning_effort: cfg.reasoningEffort };
+  }
+  if (cfg.enableThinking !== undefined) {
+    payload.chat_template_kwargs = {
+      ...payload.chat_template_kwargs,
+      enable_thinking: cfg.enableThinking,
+    };
   }
   if (cfg.mode === "tools") {
     payload.tools = openAiTools();

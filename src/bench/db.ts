@@ -53,6 +53,8 @@ export function getDb(): Database.Database {
       tool TEXT,
       args TEXT,
       reasoning TEXT,
+      notes TEXT,
+      notesSource TEXT,
       illegal TEXT,
       finishReason TEXT,
       diagnostic TEXT,
@@ -91,6 +93,8 @@ export function getDb(): Database.Database {
   try { db.exec("ALTER TABLE runs ADD COLUMN targetAnte INTEGER NOT NULL DEFAULT 8"); } catch { /* already present */ }
   try { db.exec("ALTER TABLE moves ADD COLUMN finishReason TEXT"); } catch { /* already present */ }
   try { db.exec("ALTER TABLE moves ADD COLUMN diagnostic TEXT"); } catch { /* already present */ }
+  try { db.exec("ALTER TABLE moves ADD COLUMN notes TEXT"); } catch { /* already present */ }
+  try { db.exec("ALTER TABLE moves ADD COLUMN notesSource TEXT"); } catch { /* already present */ }
   _db = db;
   return db;
 }
@@ -304,8 +308,8 @@ export function recordMovesToDb(db: Database.Database, bus: EventBus = globalBus
   if (movesSubscribed) return;
   movesSubscribed = true;
   const stmt = db.prepare(`
-    INSERT INTO moves (gameId, model, seed, step, ts, state, tool, args, reasoning, illegal, finishReason, diagnostic, tokensIn, tokensOut, costUsd)
-    VALUES (@gameId, @model, @seed, @step, @ts, @state, @tool, @args, @reasoning, @illegal, @finishReason, @diagnostic, @tokensIn, @tokensOut, @costUsd)
+    INSERT INTO moves (gameId, model, seed, step, ts, state, tool, args, reasoning, notes, notesSource, illegal, finishReason, diagnostic, tokensIn, tokensOut, costUsd)
+    VALUES (@gameId, @model, @seed, @step, @ts, @state, @tool, @args, @reasoning, @notes, @notesSource, @illegal, @finishReason, @diagnostic, @tokensIn, @tokensOut, @costUsd)
   `);
   bus.subscribe((ev) => {
     if (ev.type !== "decision") return;
@@ -317,6 +321,7 @@ export function recordMovesToDb(db: Database.Database, bus: EventBus = globalBus
         state: JSON.stringify(d.state ?? {}),
         tool: d.action?.tool ?? "", args: JSON.stringify(d.action?.args ?? {}),
         reasoning: d.reasoning ?? "", illegal: d.illegal ?? null,
+        notes: d.notes ?? null, notesSource: d.notesSource ?? null,
         finishReason: d.diagnostic?.finishReason ?? null,
         diagnostic: d.diagnostic ? JSON.stringify(d.diagnostic) : null,
         tokensIn: d.usage?.tokensIn ?? 0, tokensOut: d.usage?.tokensOut ?? 0, costUsd: d.usage?.costUsd ?? 0,
@@ -333,11 +338,11 @@ export function recordMovesArray(
   gameId: string,
   model: string,
   seed: string,
-  moves: Array<{ step?: number; ts?: number; state?: unknown; tool?: string; args?: unknown; reasoning?: string; illegal?: string | null; finishReason?: string | null; diagnostic?: unknown; tokensIn?: number; tokensOut?: number; costUsd?: number }>,
+  moves: Array<{ step?: number; ts?: number; state?: unknown; tool?: string; args?: unknown; reasoning?: string; notes?: string | null; notesSource?: string | null; illegal?: string | null; finishReason?: string | null; diagnostic?: unknown; tokensIn?: number; tokensOut?: number; costUsd?: number }>,
 ): void {
   const stmt = db.prepare(`
-    INSERT INTO moves (gameId, model, seed, step, ts, state, tool, args, reasoning, illegal, finishReason, diagnostic, tokensIn, tokensOut, costUsd)
-    VALUES (@gameId, @model, @seed, @step, @ts, @state, @tool, @args, @reasoning, @illegal, @finishReason, @diagnostic, @tokensIn, @tokensOut, @costUsd)
+    INSERT INTO moves (gameId, model, seed, step, ts, state, tool, args, reasoning, notes, notesSource, illegal, finishReason, diagnostic, tokensIn, tokensOut, costUsd)
+    VALUES (@gameId, @model, @seed, @step, @ts, @state, @tool, @args, @reasoning, @notes, @notesSource, @illegal, @finishReason, @diagnostic, @tokensIn, @tokensOut, @costUsd)
   `);
   const insertAll = db.transaction((rows: typeof moves) => {
     for (const m of rows) stmt.run({
@@ -346,6 +351,7 @@ export function recordMovesArray(
       state: JSON.stringify(m.state ?? {}),
       tool: m.tool ?? "", args: JSON.stringify(m.args ?? {}),
       reasoning: m.reasoning ?? "", illegal: m.illegal ?? null,
+      notes: m.notes ?? null, notesSource: m.notesSource ?? null,
       finishReason: m.finishReason ?? null,
       diagnostic: m.diagnostic ? JSON.stringify(m.diagnostic) : null,
       tokensIn: m.tokensIn ?? 0, tokensOut: m.tokensOut ?? 0, costUsd: m.costUsd ?? 0,
@@ -401,7 +407,7 @@ export function gamesByModel(db: Database.Database, model: string): GameSummary[
 export function gameMoves(db: Database.Database, gameId: string): { run: any; moves: any[] } {
   const run = db.prepare("SELECT * FROM runs WHERE gameId = ? LIMIT 1").get(gameId) ?? null;
   const rows = db.prepare(
-    "SELECT step, ts, state, tool, args, reasoning, illegal, finishReason, diagnostic, tokensIn, tokensOut, costUsd FROM moves WHERE gameId = ? ORDER BY id ASC",
+    "SELECT step, ts, state, tool, args, reasoning, notes, notesSource, illegal, finishReason, diagnostic, tokensIn, tokensOut, costUsd FROM moves WHERE gameId = ? ORDER BY id ASC",
   ).all(gameId) as any[];
   const moves = rows.map(m => ({ ...m, state: safeParse(m.state), args: safeParse(m.args), diagnostic: safeParse(m.diagnostic) }));
   return { run, moves };

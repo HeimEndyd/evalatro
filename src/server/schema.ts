@@ -12,6 +12,8 @@ export const MoveSubmissionSchema = z.object({
   tool: z.string().max(60),
   args: z.record(z.any()).optional(),
   reasoning: z.string().optional(),
+  notes: z.string().nullable().optional(),
+  notesSource: z.enum(["explicit", "reasoning", "none"]).nullable().optional(),
   illegal: z.string().nullable().optional(),
   finishReason: z.string().nullable().optional(),
   diagnostic: z.record(z.any()).optional(),

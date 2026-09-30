@@ -1,5 +1,5 @@
 import * as fs from "fs";
-import { BalatroBotClient } from "../client/balatrobot.js";
+import { BalatroBotClient, BalatroBotTransportError } from "../client/balatrobot.js";
 import { executeTool } from "../tools/registry.js";
 import { summarizeState, computeLegalActions, SummarizedState } from "../state/summarizer.js";
 import { DecideFn, DecideCtx, Decision } from "./decide.js";
@@ -252,6 +252,7 @@ export async function runGame(decide: DecideFn, opts: RunOptions): Promise<RunRe
       try {
         state = await executeTool(client, decision.tool, decision.args);
       } catch (e: any) {
+        if (e instanceof BalatroBotTransportError) throw e;
         // The model proposed something the game rejected (wrong state, no tool
         // call, bad args). Count it (a rules/format signal) and keep playing.
         rec.illegalActions++;
@@ -267,17 +268,19 @@ export async function runGame(decide: DecideFn, opts: RunOptions): Promise<RunRe
       bus.emit({
         type: "decision", gameId, model, seed, ts: Date.now(), step,
         reasoning: decision.reasoning ?? "",
+        notes: decision.notes, notesSource: decision.notesSource,
         action: { tool: decision.tool, args: decision.args },
         legalActions, state: preState as any, usage: decision.usage, diagnostic: decision.diagnostic, illegal,
       });
       log({
         ts: Date.now(), type: "decision", gameId, model, seed, step,
-        reasoning: decision.reasoning, action: { tool: decision.tool, args: decision.args }, legalActions, diagnostic: decision.diagnostic, illegal,
+        reasoning: decision.reasoning, notes: decision.notes, notesSource: decision.notesSource, action: { tool: decision.tool, args: decision.args }, legalActions, diagnostic: decision.diagnostic, illegal,
       });
       progress({
         type: "decision_end", step,
         durationMs: Date.now() - decisionStarted,
         reasoning: decision.reasoning ?? "",
+        notes: decision.notes ?? null, notesSource: decision.notesSource ?? "none",
         action: { tool: decision.tool, args: decision.args },
         usage: decision.usage ?? null,
         illegal: illegal ?? null,

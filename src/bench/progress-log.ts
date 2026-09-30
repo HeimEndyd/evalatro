@@ -48,7 +48,8 @@ export interface ProgressLog {
 
 /** Collision-safe, synchronous JSONL: every event is readable immediately after write(). */
 export function createProgressLog(fileStem: string): ProgressLog {
-  const dir = path.resolve(process.env.EVALATRO_RUNS_DIR || path.join("..", "var", "runs", "evalatro"));
+  // The bench cwd is projects/evalatro; the stand run directory is at its root.
+  const dir = path.resolve(process.env.EVALATRO_RUNS_DIR || path.join("..", "..", "var", "runs", "evalatro"));
   fs.mkdirSync(dir, { recursive: true });
   const logPath = path.join(dir, `${fileStem}.progress.jsonl`);
   const fd = fs.openSync(logPath, "wx", 0o640);
