@@ -18,6 +18,8 @@ export class BalatroBotClient {
   private baseUrl: string;
   private config: BalatroBotConfig;
   private logStream: fs.WriteStream | null = null;
+  private eventSink?: (event: Record<string, unknown> & { type: string }) => void;
+  private requestSequence = 0;
 
   constructor(config: Partial<BalatroBotConfig> = {}) {
     this.config = {
@@ -36,6 +38,10 @@ export class BalatroBotClient {
     this.logStream = stream;
   }
 
+  setEventSink(sink: (event: Record<string, unknown> & { type: string }) => void) {
+    this.eventSink = sink;
+  }
+
   private logEntry(method: string, params: unknown, result: unknown, error?: string) {
     if (!this.logStream) return;
     this.logStream.write(JSON.stringify({
@@ -50,17 +56,22 @@ export class BalatroBotClient {
   private async call<T>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     let lastError: Error | null = null;
     // A timed-out mutation may already have taken effect. Never replay it.
-    const retries = ["health", "gamestate"].includes(method) ? this.config.retries : 0;
+    const readOnly = ["health", "gamestate"].includes(method);
+    const retries = readOnly ? this.config.retries : 0;
     for (let attempt = 0; attempt <= retries; attempt++) {
       const controller = new AbortController();
       const timeout = method === "play" ? this.config.playTimeout
-        : retries > 0 ? this.config.timeout : this.config.mutationTimeout;
+        : readOnly ? this.config.timeout : this.config.mutationTimeout;
+      const startedAt = Date.now();
+      const requestId = `${startedAt}-${++this.requestSequence}`;
+      const metadata = { requestId, method, params, attempt: attempt + 1, timeoutMs: timeout, startedAt };
+      this.eventSink?.({ type: "game_rpc_start", ...metadata });
       const timer = setTimeout(() => controller.abort(), timeout);
       try {
         const response = await request(this.baseUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ jsonrpc: "2.0", method, params, id: 1 }),
+          body: JSON.stringify({ jsonrpc: "2.0", method, params, id: requestId }),
           signal: controller.signal,
         });
         const body = await response.body.json() as { result?: T; error?: { message: string; data?: { name: string } } };
@@ -71,8 +82,12 @@ export class BalatroBotClient {
           throw err;
         }
         this.logEntry(method, params, body.result);
+        this.eventSink?.({ type: "game_rpc_end", ...metadata, durationMs: Date.now() - startedAt });
         return body.result as T;
       } catch (e: any) {
+        this.eventSink?.({ type: "game_rpc_error", ...metadata, durationMs: Date.now() - startedAt,
+          error: controller.signal.aborted ? `timeout after ${timeout}ms` : e.message,
+          failureKind: e instanceof BalatroBotRpcError ? "rpc" : "transport" });
         if (e instanceof BalatroBotRpcError) throw e;
         lastError = controller.signal.aborted
           ? new Error(`timeout after ${timeout}ms`, { cause: e })

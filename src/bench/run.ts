@@ -6,7 +6,7 @@ import { openBrowser } from "../web-open.js";
 import { launchBalatro, waitForHealth, sleep } from "../game/launch.js";
 import { runGame } from "../game/loop.js";
 import { naiveDecide, DecideFn } from "../game/decide.js";
-import { BalatroBotClient } from "../client/balatrobot.js";
+import { BalatroBotClient, BalatroBotTransportError } from "../client/balatrobot.js";
 import { getDb, insertRun, recordMovesToDb } from "./db.js";
 import { printLeaderboard } from "./leaderboard.js";
 import { startRelay } from "../stream/relay.js";
@@ -83,6 +83,7 @@ async function main() {
       const rawLogPath = path.resolve("logs", logFileName);
       const logStream = fs.createWriteStream(rawLogPath, { flags: "wx" });
       const progress = createProgressLog(logFileName.replace(/\.jsonl$/, ""));
+      client.setEventSink(event => progress.write({ gameId, model: label, seed, ...event }));
       let stage = "endpoint_health";
       try {
         progress.write({ type: "endpoint_health_check", gameId, model: label, seed, endpoint: `http://127.0.0.1:${cfg.basePort}` });
@@ -97,9 +98,15 @@ async function main() {
         stage = "db_persist";
         insertRun(db, rec, "bench");
         progress.write({ type: "db_persisted", gameId, model: label, seed, db: path.resolve(process.env.BENCH_DB || "bench/bench.db") });
+        stage = "game_result";
+        // Aborting HTTP does not cancel Lua: menu/start on the next seed can
+        // clear a still-running callback. Never reuse that game session.
+        if (rec.outcome === "error" && rec.error?.startsWith("game transport failed (")) {
+          throw new BalatroBotTransportError(rec.error);
+        }
+        if (failFast && rec.outcome === "error") throw new Error(rec.error ?? "game failed");
         stage = "submit";
         if (["won", "lost", "stuck"].includes(rec.outcome)) await maybeSubmit(db, rec, model, cfg);
-        if (failFast && rec.outcome === "error") throw new Error(rec.error ?? "game failed");
         console.error(
           `  ante=${rec.maxAnte} actions=${rec.actions} illegal=${rec.illegalActions}` +
           (rec.error ? ` ERROR: ${rec.error}` : ""),
@@ -107,7 +114,7 @@ async function main() {
       } catch (e: any) {
         progress.write({ type: "run_failed", gameId, model: label, seed, stage, error: e.message, rawLog: rawLogPath });
         console.error(`  FAILED: ${e.message}`);
-        if (failFast) throw e;
+        if (failFast || e instanceof BalatroBotTransportError) throw e;
       } finally {
         logStream.end();
         progress.close();
